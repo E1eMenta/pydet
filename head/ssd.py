@@ -38,7 +38,7 @@ class AnchorCellCreator:
         self.smin = smin
         self.smax = smax
 
-        self.anchors_per_cell = [len(ars) for ars in aspect_ratios]
+        self.anchors_per_cell = [len(ars) + 1 for ars in aspect_ratios]
 
     def __call__(self, k, box):
         s_k = s_(k, self.smin, self.smax, len(self.aspect_ratios))
@@ -127,7 +127,7 @@ class SSDHead(nn.Module):
 
         return conf, loc, self.anchors
 
-def SSDPostprocess(conf_batch, loc_batch, anchors, score_thresh=0.5, nms_threshold=0.5, variances=(0.1, 0.2)):
+def SSDPostprocess(conf_batch, loc_batch, anchors, score_thresh=0.01, nms_threshold=0.5, variances=(0.1, 0.2)):
     conf_batch_np = conf_batch.cpu().numpy()
     loc_batch_np = loc_batch.cpu().numpy()
     anchors_np = anchors.cpu().numpy()

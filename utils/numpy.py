@@ -182,9 +182,9 @@ def NMS(bboxes, scores, labels=None, threshold=0.5, max_output_size=100 ):
 
     selected_indices = [idx_sort[0]]
     chosen_boxes = np.expand_dims(bboxes[0], axis=0)
-    selected_labels = labels[0]
+    selected_labels = labels[0:1]
 
-    for idx, (box, label) in enumerate(zip(bboxes[1:], labels[1:])):
+    for idx, (box, label) in enumerate(zip(bboxes[1:], labels[1:, np.newaxis])):
         real_idx = idx + 1
 
         IoUs = iou_b2v(box, chosen_boxes)
@@ -193,7 +193,7 @@ def NMS(bboxes, scores, labels=None, threshold=0.5, max_output_size=100 ):
         if np.sum(IoUs > threshold) == 0:
             selected_indices.append(idx_sort[real_idx])
             chosen_boxes = np.concatenate([chosen_boxes, np.expand_dims(box, axis=0)], axis=0)
-            selected_labels = np.concatenate(selected_labels, label)
+            selected_labels = np.concatenate([selected_labels, label])
             if len(chosen_boxes) >= max_output_size:
                 break
     selected_indices = np.stack(selected_indices)
