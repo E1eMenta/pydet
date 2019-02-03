@@ -8,7 +8,7 @@ from torch.utils.data import Dataset
 
 from pycocotools.coco import COCO
 
-from utils.vis import draw_boxes
+from ..utils.vis import draw_boxes
 
 class CocoDataset(Dataset):
     """Coco dataset."""
@@ -70,7 +70,7 @@ class CocoDataset(Dataset):
         for key, value in self.classes.items():
             self.labels[value] = key
 
-        self.CLASS = self.labels
+        self.CLASSES = self.labels
 
     def __len__(self):
         return len(self.image_ids)
@@ -99,9 +99,9 @@ class CocoDataset(Dataset):
 
         if self.show:
             image = sample["image"].copy().astype(np.uint8)
-            image = draw_boxes(image, sample["bboxes"], sample["labels"], class_idx_to_name=self.CLASS)
+            image = draw_boxes(image, sample["bboxes"], sample["labels"], class_idx_to_name=self.CLASSES)
             cv2.imshow("image", image)
-            cv2.waitKey(500)
+            cv2.waitKey()
         return sample
 
     def load_image(self, image_index):
@@ -154,4 +154,4 @@ class CocoDataset(Dataset):
         return float(image['width']) / float(image['height'])
 
 
-from torchvision.transforms import Compose
+# from torchvision.transforms import Compose

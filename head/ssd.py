@@ -1,9 +1,10 @@
 import torch
 from torch import nn
+import torch.nn.functional as F
 
 import numpy as np
 
-from utils.numpy import SSDDecode, NMS
+from ..utils.numpy import SSDDecodeConf, SSDDecodeBoxes, NMS
 
 default_aspect_ratios = [
     [2, 1, 1 / 2],
@@ -127,17 +128,16 @@ class SSDHead(nn.Module):
 
         return conf, loc, self.anchors
 
-def SSDPostprocess(conf_batch, loc_batch, anchors, score_thresh=0.01, nms_threshold=0.5, variances=(0.1, 0.2)):
+def SSDPostprocess(output, score_thresh=0.01, nms_threshold=0.5, variances=(0.1, 0.2)):
+    conf_batch, loc_batch, anchors = output
+    conf_batch = F.softmax(conf_batch, dim=-1)
+
     conf_batch_np = conf_batch.cpu().numpy()
     loc_batch_np = loc_batch.cpu().numpy()
     anchors_np = anchors.cpu().numpy()
 
-    bboxes_batch, labels_batch, scores_batch = SSDDecode(
-        conf_batch_np,
-        loc_batch_np,
-        anchors_np,
-        variances
-    )
+    labels_batch, scores_batch = SSDDecodeConf(conf_batch_np)
+    bboxes_batch = SSDDecodeBoxes(loc_batch_np, anchors_np, variances=variances)
 
     chosen_bboxes = []
     chosen_labels = []

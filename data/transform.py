@@ -2,7 +2,7 @@ import numpy as np
 import random
 import cv2
 
-from utils.numpy import iou_b2v
+from ..utils.numpy import iou_b2v
 
 class Compose(object):
     def __init__(self, transforms):

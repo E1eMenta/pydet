@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from utils.numpy import SSDEncode
+from ..utils.numpy import SSDEncode
 
 class SSDLoss(nn.Module):
     def __init__(self, match_thresh=0.5, neg_pos=3,  variance=(0.1, 0.2)):
@@ -57,4 +57,4 @@ class SSDLoss(nn.Module):
         localization_loss = localization_loss / N
         total_loss = class_loss + localization_loss
 
-        return total_loss, class_loss, localization_loss
+        return total_loss

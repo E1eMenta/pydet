@@ -8,7 +8,7 @@ from shutil import move
 from torch.utils.data import Dataset
 import xml.etree.ElementTree as ET
 
-from utils.vis import draw_boxes
+from ..utils.vis import draw_boxes
 
 class VOCAnnotationTransform(object):
     """Transforms a VOC annotation into a Tensor of bbox coords and label index
@@ -22,7 +22,7 @@ class VOCAnnotationTransform(object):
         width (int): width
     """
 
-    def __init__(self, class_to_ind=None, keep_difficult=False):
+    def __init__(self, CLASSES, class_to_ind=None, keep_difficult=False):
         self.class_to_ind = class_to_ind or dict(
             zip(CLASSES, range(len(CLASSES))))
         self.keep_difficult = keep_difficult
@@ -88,7 +88,7 @@ class VOCDataset(Dataset):
         self.image_set = image_sets
         self.transform = transform
         self.show = show
-        self.target_transform = VOCAnnotationTransform()
+        self.target_transform = VOCAnnotationTransform(self.CLASSES)
         self.class_names = self.CLASSES
 
         if download and not os.path.exists(os.path.join(root, "VOC2012")):
@@ -155,7 +155,7 @@ class VOCDataset(Dataset):
 
         if self.show:
             image = sample["image"].copy().astype(np.uint8)
-            image = draw_boxes(image, sample["bboxes"], sample["labels"], class_idx_to_name=CLASSES)
+            image = draw_boxes(image, sample["bboxes"], sample["labels"], class_idx_to_name=self.CLASSES)
             cv2.imshow("image", image)
             cv2.waitKey(0)
         return sample

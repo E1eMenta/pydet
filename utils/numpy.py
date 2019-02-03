@@ -79,11 +79,51 @@ def softmax(x, axis=-1):
     sum_exp = np.sum(exp, axis=axis, keepdims=True)
     return exp / sum_exp
 
-def SSDDecode(conf_batch, loc_batch, anchors, variances=(0.1, 0.2)):
+# def SSDDecodeConf(conf_batch, loc_batch, anchors, variances=(0.1, 0.2)):
+#     '''
+#
+#     :param conf_batch: (ndarray) SSD classification output, shape [batch size, anchors num, classes num + 1]. Zero index of
+#         axis=2 corresponds to background class
+#     :param loc: (ndarray) SSD localization output, shape [batch size, anchors num, 4]
+#     :param anchors: (ndarray) Anchors in center form, shape [anchors num, 4]
+#     :param variances: Magical numbers:)  Loss coeffs for center localization and size localization
+#     :return: bboxes_batch: List [batch size] of (ndarray) predicted bboxes in point (xmin, ymin, xmax, ymax) form, shape [N, 4]
+#              labels_batch: List [batch size] of (ndarray) predicted labels of boxes, shape [N]
+#              scores_batch: List [batch size] of (ndarray) predicted scores of boxes, shape [N]
+#     '''
+#     loc_batch = np.clip(loc_batch, a_min=-10e5, a_max=10)
+#
+#     scores_wo_background = softmax(conf_batch, axis=-1)[:, :, 1:]
+#     scores_batch = np.max(scores_wo_background, axis=-1)
+#     labels_batch = np.argmax(scores_wo_background, axis=-1)
+#
+#     anchors = anchors[np.newaxis]
+#     bboxes_batch = np.concatenate((
+#         anchors[:, :, :2] + loc_batch[:, :, :2] * variances[0] * anchors[:, :, 2:],
+#         anchors[:, :, 2:] * np.exp(loc_batch[:, :, 2:] * variances[1])), axis=2)
+#
+#     bboxes_batch[:, :, :2] -= bboxes_batch[:, :, 2:] / 2
+#     bboxes_batch[:, :, 2:] += bboxes_batch[:, :, :2]
+#     return bboxes_batch, labels_batch, scores_batch
+
+def SSDDecodeConf(conf_batch):
     '''
 
-    :param conf: (ndarray) SSD classification output, shape [batch size, anchors num, classes num + 1]. Zero index of
+    :param conf_batch: (ndarray) SSD classification output, shape [batch size, anchors num, classes num + 1]. Zero index of
         axis=2 corresponds to background class
+    :return: labels_batch: List [batch size] of (ndarray) predicted labels of boxes, shape [N]
+             scores_batch: List [batch size] of (ndarray) predicted scores of boxes, shape [N]
+    '''
+
+    scores_wo_background = conf_batch[:, :, 1:]
+    scores_batch = np.max(scores_wo_background, axis=-1)
+    labels_batch = np.argmax(scores_wo_background, axis=-1)
+
+    return labels_batch, scores_batch
+
+def SSDDecodeBoxes(loc_batch, anchors, variances=(0.1, 0.2)):
+    '''
+
     :param loc: (ndarray) SSD localization output, shape [batch size, anchors num, 4]
     :param anchors: (ndarray) Anchors in center form, shape [anchors num, 4]
     :param variances: Magical numbers:)  Loss coeffs for center localization and size localization
@@ -93,17 +133,14 @@ def SSDDecode(conf_batch, loc_batch, anchors, variances=(0.1, 0.2)):
     '''
     loc_batch = np.clip(loc_batch, a_min=-10e5, a_max=10)
 
-    scores_wo_background = softmax(conf_batch, axis=-1)[:, :, 1:]
-    scores_batch = np.max(scores_wo_background, axis=-1)
-    labels_batch = np.argmax(scores_wo_background, axis=-1)
-
     anchors = anchors[np.newaxis]
     bboxes_batch = np.concatenate((
         anchors[:, :, :2] + loc_batch[:, :, :2] * variances[0] * anchors[:, :, 2:],
         anchors[:, :, 2:] * np.exp(loc_batch[:, :, 2:] * variances[1])), axis=2)
 
-
-    return bboxes_batch, labels_batch, scores_batch
+    bboxes_batch[:, :, :2] -= bboxes_batch[:, :, 2:] / 2
+    bboxes_batch[:, :, 2:] += bboxes_batch[:, :, :2]
+    return bboxes_batch
 
 def SSDEncode(targets, anchors, variances=(0.1, 0.2), threshold=0.5):
     '''
