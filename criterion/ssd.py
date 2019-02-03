@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from ..utils.numpy import SSDEncode
+from ..utils.torch import SSDEncode
 
 class SSDLoss(nn.Module):
     def __init__(self, match_thresh=0.5, neg_pos=3,  variance=(0.1, 0.2)):
@@ -15,17 +15,11 @@ class SSDLoss(nn.Module):
         pred_conf, pred_loc, anchors = model_output
         batch_size, anchors_num, n_classes = pred_conf.shape
 
-        anchors = anchors.cpu().numpy()
-        targets = [(target[0].cpu().numpy(), target[1].cpu().numpy()) for target in targets]
-
         target_conf, target_loc = SSDEncode(
             targets, anchors,
             variances=self.variance,
             threshold=self.match_thresh
         )
-
-        target_conf = torch.from_numpy(target_conf).to(pred_conf.device).long()
-        target_loc = torch.from_numpy(target_loc).to(pred_conf.device)
 
         positive_position = target_conf > 0
         N = torch.sum(positive_position).float()

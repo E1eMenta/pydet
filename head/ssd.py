@@ -77,7 +77,7 @@ def create_anchors(sizes, anchor_creator):
                 boxes = anchor_creator(k, [cell_cx, cell_cy, cell_w, cell_h])
                 anchors.append(boxes)
 
-    anchors = np.concatenate(anchors, axis=0)
+    anchors = np.concatenate(anchors, axis=0).astype(np.float32)
     return torch.from_numpy(anchors)
 
 class SSDHead(nn.Module):

@@ -42,7 +42,7 @@ def point_form(boxes):
     return torch.cat((boxes[:, :2] - boxes[:, 2:]/2,     # xmin, ymin
                      boxes[:, :2] + boxes[:, 2:]/2), 1)  # xmax, ymax
 
-def SSDEncode_batch(targets, anchors, variances=(0.1, 0.2), threshold=0.5):
+def SSDEncode(targets, anchors, variances=(0.1, 0.2), threshold=0.5):
     anchors_num = anchors.shape[0]
     conf_batch = []
     loc_batch = []
