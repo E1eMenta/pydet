@@ -128,6 +128,7 @@ class VOCDataset(Dataset):
 
         target = ET.parse(self._annopath % img_id).getroot()
         img = cv2.imread(self._imgpath % img_id)
+        img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
         height, width, _ = img.shape
 
         if self.target_transform is not None:

@@ -64,7 +64,7 @@ class DefaultAnchorCreator(AnchorCellCreator):
     def __init__(self):
         super().__init__(default_aspect_ratios)
 
-def create_anchors(sizes, anchor_creator):
+def create_anchors(sizes, anchor_creator, clamp=True):
     anchors = []
     for k, (H, W) in enumerate(sizes):
         cell_h = 1.0 / H
@@ -78,7 +78,10 @@ def create_anchors(sizes, anchor_creator):
                 anchors.append(boxes)
 
     anchors = np.concatenate(anchors, axis=0).astype(np.float32)
-    return torch.from_numpy(anchors)
+    anchors = torch.from_numpy(anchors)
+    if clamp:
+        anchors = torch.clamp(anchors, 0.0, 1.0)
+    return anchors
 
 class SSDHead(nn.Module):
     def __init__(self, n_classes, in_channels, anchor_creator=DefaultAnchorCreator()):
@@ -99,8 +102,8 @@ class SSDHead(nn.Module):
 
         self.detection_layers = nn.ModuleList(self.detection_layers)
 
-        self.last_H0 = None
-        self.last_W0 = None
+        self.last_H0 = 0
+        self.last_W0 = 0
         self.anchors = None
 
 

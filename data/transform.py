@@ -186,10 +186,10 @@ class PhotometricDistort(object):
 
 
 class Expand(object):
-    def __init__(self, ratio=4, p=0.5):
+    def __init__(self, ratio=4, p=0.5, mean=(0, 0, 0)):
         self.ratio = ratio
         self.p = p
-
+        self.mean = mean
     def __call__(self, image, boxes, labels):
         if random.random() > self.p:
             return image, boxes, labels
@@ -202,6 +202,7 @@ class Expand(object):
         expand_image = np.zeros(
             (int(height*ratio), int(width*ratio), depth),
             dtype=image.dtype)
+        expand_image[:, :, :] = self.mean
         expand_image[int(top):int(top + height),
                      int(left):int(left + width)] = image
         image = expand_image
@@ -344,7 +345,7 @@ class Resize(object):
         return image, boxes, labels
 
 class SSDAugmentation(object):
-    def __init__(self, size=(300, 300), mean=(0, 0, 0)):
+    def __init__(self, size=(300, 300), mean=(127, 127, 127)):
         self.mean = mean
         self.size = size
         self.augment = Compose([
@@ -356,7 +357,8 @@ class SSDAugmentation(object):
             ToPercentCoords(),
             Resize(self.size),
             ToAbsoluteCoords(),
-            SubtractMeans(self.mean)
+            SubtractMeans(self.mean),
+            lambda img, boxes=None, labels=None: (img / 128.0, boxes, labels),
         ])
 
     def __call__(self, **sample):
