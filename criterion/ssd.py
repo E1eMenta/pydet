@@ -139,7 +139,7 @@ class MultiboxLoss(nn.Module):
         self.center_variance = variances[0]
         self.size_variance = variances[1]
 
-    def forward(self, confidence, predicted_locations, priors, target_labels, target_boxes):
+    def forward(self, model_out, target):
         """Compute classification loss and smooth l1 loss.
 
         Args:
@@ -148,6 +148,9 @@ class MultiboxLoss(nn.Module):
             labels (batch_size, num_priors): real labels of all the priors.
             boxes (batch_size, num_priors, 4): real boxes corresponding all the priors.
         """
+        confidence, predicted_locations, priors = model_out
+        target_boxes, target_labels = target
+
         device = confidence.device
         labels = []
         gt_locations = []
