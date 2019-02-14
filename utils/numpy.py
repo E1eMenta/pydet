@@ -213,7 +213,7 @@ def NMS(bboxes, scores, labels=None, threshold=0.5, max_output_size=100 ):
 
     labels = labels if labels is not None else np.zeros(len(scores))
 
-    idx_sort = np.argsort(scores)
+    idx_sort = np.argsort(-scores)
     bboxes = bboxes[idx_sort]
     labels = labels[idx_sort]
 
