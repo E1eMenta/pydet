@@ -1,4 +1,5 @@
 import os
+import random
 import urllib.request
 import zipfile
 import numpy as np
@@ -7,8 +8,6 @@ import cv2
 from torch.utils.data import Dataset
 
 from pycocotools.coco import COCO
-
-from ..utils.vis import draw_boxes
 
 class CocoDataset(Dataset):
     """Coco dataset."""
@@ -70,39 +69,24 @@ class CocoDataset(Dataset):
         for key, value in self.classes.items():
             self.labels[value] = key
 
-        self.CLASSES = self.labels
+        self.class_names = self.labels
 
     def __len__(self):
         return len(self.image_ids)
 
     def __getitem__(self, idx):
-        img = self.load_image(idx)
+        image = self.load_image(idx)
         annot = self.load_annotations(idx)
-        bboxes = annot[:, :4].astype(np.float32)
-        labels = annot[:, 4].astype(np.int32)
+        boxes = annot[:, :4].astype(np.float32)
+        labels = annot[:, 4].astype(np.int64) + 1
 
-        sample = {'image': img, 'bboxes': bboxes, "labels": labels}
+        if len(boxes) == 0:
+            return self[random.randint(0, len(self) - 1)]
 
         if self.transform:
-            sample = self.transform(**sample)
+            image, boxes, labels = self.transform(image, boxes, labels)
 
-        height, width, _ = sample['image'].shape
-        if len(sample['bboxes']) == 0:
-            bboxes = np.zeros((0, 4))
-        else:
-            bboxes = np.stack(sample['bboxes'])
-        bboxes[:, 0] /= width
-        bboxes[:, 1] /= height
-        bboxes[:, 2] /= width
-        bboxes[:, 3] /= height
-        sample['bboxes'] = bboxes
-
-        if self.show:
-            image = sample["image"].copy().astype(np.uint8)
-            image = draw_boxes(image, sample["bboxes"], sample["labels"], class_idx_to_name=self.CLASSES)
-            cv2.imshow("image", image)
-            cv2.waitKey()
-        return sample
+        return image, (boxes, labels)
 
     def load_image(self, image_index):
         image_info = self.coco.loadImgs(self.image_ids[image_index])[0]
@@ -112,7 +96,8 @@ class CocoDataset(Dataset):
         if len(img.shape) == 2:
             img = cv2.cvtColor(img, cv2.COLOR_GRAY2BGR)
 
-        return img.astype(np.float32)
+        # img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+        return img
 
     def load_annotations(self, image_index):
         # get ground truth annotations
