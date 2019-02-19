@@ -6,15 +6,6 @@ import numpy as np
 
 from ..utils.numpy import SSDDecodeConf, SSDDecodeBoxes, NMS
 
-default_aspect_ratios = [
-    [2, 1, 1 / 2],
-    [2, 1 / 2, 1, 3, 1 / 3],
-    [2, 1 / 2, 1, 3, 1 / 3],
-    [2, 1 / 2, 1, 3, 1 / 3],
-    [2, 1, 1 / 2],
-    [2, 1, 1 / 2]
-]
-
 def s_(k, smin, smax, m):
     '''
     Area of box at k-th feature map from SSD paper
@@ -27,26 +18,24 @@ def s_(k, smin, smax, m):
     s_k = smin + (smax - smin) / (m - 1) * k
     return s_k
 
-class AnchorCellCreator:
-    def __init__(self, aspect_ratios, smin=0.2, smax=0.9):
-        '''
 
-        :param aspect_ratios:
-        :param smin:
-        :param smax:
-        '''
+class AnchorCellCreator:
+    def __init__(self, aspect_ratios, smin=0.2, smax=0.95):
         self.aspect_ratios = aspect_ratios
         self.smin = smin
         self.smax = smax
 
         self.anchors_per_cell = [len(ars) + 1 for ars in aspect_ratios]
 
-    def __call__(self, k, box):
+    def __call__(self, k, H, W, h_i, w_i):
         s_k = s_(k, self.smin, self.smax, len(self.aspect_ratios))
         s_kplus = s_(k, self.smin, self.smax, len(self.aspect_ratios))
         s_prime = np.sqrt(s_k * s_kplus)
 
-        cell_cx, cell_cy, cell_w, cell_h = box
+        cell_h = 1.0 / H
+        cell_w = 1.0 / W
+        cell_cx = (w_i + 0.5) * cell_w
+        cell_cy = (h_i + 0.5) * cell_h
 
         anchors = []
         for ar in self.aspect_ratios[k]:
@@ -60,9 +49,7 @@ class AnchorCellCreator:
 
         return np.stack(anchors)
 
-class DefaultAnchorCreator(AnchorCellCreator):
-    def __init__(self):
-        super().__init__(default_aspect_ratios)
+
 
 def create_anchors(sizes, anchor_creator, clamp=True):
     anchors = []
@@ -74,7 +61,7 @@ def create_anchors(sizes, anchor_creator, clamp=True):
                 cell_cx = (w_i + 0.5) * cell_w
                 cell_cy = (h_i + 0.5) * cell_h
 
-                boxes = anchor_creator(k, [cell_cx, cell_cy, cell_w, cell_h])
+                boxes = anchor_creator(k, H, W, h_i, w_i)
                 anchors.append(boxes)
 
     anchors = np.concatenate(anchors, axis=0).astype(np.float32)
@@ -84,7 +71,7 @@ def create_anchors(sizes, anchor_creator, clamp=True):
     return anchors
 
 class SSDHead(nn.Module):
-    def __init__(self, n_classes, in_channels, anchor_creator=DefaultAnchorCreator()):
+    def __init__(self, n_classes, in_channels, anchor_creator):
         super().__init__()
 
         self.n_classes      = n_classes
