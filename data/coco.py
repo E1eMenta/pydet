@@ -77,10 +77,17 @@ class CocoDataset(Dataset):
     def __getitem__(self, idx):
         image = self.load_image(idx)
         annot = self.load_annotations(idx)
+        
         boxes = annot[:, :4].astype(np.float32)
         labels = annot[:, 4].astype(np.int64) + 1
+        height, width, channels = image.shape
+        boxes[:, 0] /= width
+        boxes[:, 2] /= width
+        boxes[:, 1] /= height
+        boxes[:, 3] /= height
+        
 
-        if len(boxes) == 0:
+        if len(boxes) == 0 and "train" in self.set_name:
             return self[random.randint(0, len(self) - 1)]
 
         if self.transform:
@@ -96,7 +103,8 @@ class CocoDataset(Dataset):
         if len(img.shape) == 2:
             img = cv2.cvtColor(img, cv2.COLOR_GRAY2BGR)
 
-        # img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+        img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+        img = img.astype(np.float32)
         return img
 
     def load_annotations(self, image_index):

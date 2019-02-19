@@ -136,8 +136,7 @@ class MultiboxLoss(nn.Module):
         super(MultiboxLoss, self).__init__()
         self.iou_threshold = iou_threshold
         self.neg_pos_ratio = neg_pos_ratio
-        self.center_variance = variances[0]
-        self.size_variance = variances[1]
+        self.variances = variances
 
     def forward(self, model_out, target):
         """Compute classification loss and smooth l1 loss.
@@ -156,7 +155,7 @@ class MultiboxLoss(nn.Module):
         gt_locations = []
 
         for boxes_i, labels_i in zip(target_boxes, target_labels):
-            pred_locations_i, pred_labels_i = match_boxes(boxes_i, labels_i, priors, )
+            pred_locations_i, pred_labels_i = match_boxes(boxes_i, labels_i, priors, self.variances, self.iou_threshold)
             gt_locations.append(pred_locations_i)
             labels.append(pred_labels_i)
 

@@ -105,12 +105,12 @@ class ToPercentCoords(object):
 
 
 class Resize(object):
-    def __init__(self, size=300):
+    def __init__(self, size=(300, 300)):
         self.size = size
 
     def __call__(self, image, boxes=None, labels=None):
-        image = cv2.resize(image, (self.size,
-                                 self.size))
+        image = cv2.resize(image, (self.size[1],
+                                 self.size[0]))
         return image, boxes, labels
 
 
@@ -208,13 +208,21 @@ class ToCV2Image(object):
     def __call__(self, tensor, boxes=None, labels=None):
         return tensor.cpu().numpy().astype(np.float32).transpose((1, 2, 0)), boxes, labels
 
+class ChannelsFirst():
+    def __call__(self, image, boxes=None, labels=None):
+        return np.transpose(image, (2, 0, 1)), boxes, labels
+
+class ImageToTensor:
+    def __call__(self, image, boxes=None, labels=None):
+        return torch.from_numpy(image), boxes, labels
+
 
 class ToTensor(object):
     def __call__(self, cvimage, boxes=None, labels=None):
         return torch.from_numpy(cvimage.astype(np.float32)).permute(2, 0, 1), boxes, labels
 
 
-class RandomSampleCrop(object):
+class RandomSSDCrop(object):
     """Crop
     Arguments:
         img (Image): the image being input during training
@@ -227,7 +235,9 @@ class RandomSampleCrop(object):
             boxes (Tensor): the adjusted bounding boxes in pt form
             labels (Tensor): the class labels for each bbox
     """
-    def __init__(self):
+    def __init__(self, scale_range=(0.3, 1.0), ar_range=(0.5, 2.0)):
+        self.scale_range = scale_range
+        self.ar_range = ar_range
         self.sample_options = (
             # using entire original input image
             None,
@@ -239,13 +249,17 @@ class RandomSampleCrop(object):
             # randomly sample a patch
             (None, None),
         )
+        self.absolute = ToAbsoluteCoords()
+        self.persent = ToPercentCoords()
 
     def __call__(self, image, boxes=None, labels=None):
         height, width, _ = image.shape
+        image, boxes, labels = self.absolute(image, boxes, labels)
         while True:
             # randomly choose a mode
             mode = random.choice(self.sample_options)
             if mode is None:
+                image, boxes, labels = self.persent(image, boxes, labels)
                 return image, boxes, labels
 
             min_iou, max_iou = mode
@@ -258,11 +272,14 @@ class RandomSampleCrop(object):
             for _ in range(50):
                 current_image = image
 
-                w = random.uniform(0.3 * width, width)
-                h = random.uniform(0.3 * height, height)
+                ar = random.uniform(self.ar_range[0], self.ar_range[1])
+                scale = random.uniform(self.scale_range[0], self.scale_range[1])
+
+                w = min(width * scale * np.sqrt(ar), width)
+                h = min(height * scale / np.sqrt(ar), height)
 
                 # aspect ratio constraint b/t .5 & 2
-                if h / w < 0.5 or h / w > 2:
+                if h / w < self.ar_range[0] or h / w > self.ar_range[1]:
                     continue
 
                 left = random.uniform(width - w)
@@ -315,19 +332,26 @@ class RandomSampleCrop(object):
                 # adjust to crop (by substracting crop's left,top)
                 current_boxes[:, 2:] -= rect[:2]
 
+                image, boxes, labels = self.persent(current_image, current_boxes, current_labels)
                 return current_image, current_boxes, current_labels
 
 
 class Expand(object):
-    def __init__(self, mean):
+    def __init__(self, mean, p=0.5, expand_ratio=4.0):
         self.mean = mean
+        self.p = p
+        self.expand_ratio = expand_ratio
+        self.absolute = ToAbsoluteCoords()
+        self.persent = ToPercentCoords()
 
     def __call__(self, image, boxes, labels):
-        if random.randint(2):
+        if random.random() > self.p:
             return image, boxes, labels
 
+        image, boxes, labels = self.absolute(image, boxes, labels)
+
         height, width, depth = image.shape
-        ratio = random.uniform(1, 4)
+        ratio = random.uniform(1, self.expand_ratio)
         left = random.uniform(0, width*ratio - width)
         top = random.uniform(0, height*ratio - height)
 
@@ -343,17 +367,26 @@ class Expand(object):
         boxes[:, :2] += (int(left), int(top))
         boxes[:, 2:] += (int(left), int(top))
 
+        image, boxes, labels = self.persent(image, boxes, labels)
+
         return image, boxes, labels
 
 
 class RandomMirror(object):
-    def __call__(self, image, boxes, classes):
+    def __init__(self, p=0.5):
+        self.p = p
+        self.absolute = ToAbsoluteCoords()
+        self.persent = ToPercentCoords()
+
+    def __call__(self, image, boxes, labels):
+        image, boxes, labels = self.absolute(image, boxes, labels)
         _, width, _ = image.shape
-        if random.randint(2):
+        if random.random() > self.p:
             image = image[:, ::-1]
             boxes = boxes.copy()
             boxes[:, 0::2] = width - boxes[:, 2::-2]
-        return image, boxes, classes
+        image, boxes, labels = self.persent(image, boxes, labels)
+        return image, boxes, labels
 
 
 class SwapChannels(object):
@@ -406,9 +439,20 @@ class PhotometricDistort(object):
         return self.rand_light_noise(im, boxes, labels)
 
 
+class Normalize:
+    def __init__(self, mean, std):
+        self.mean = np.array(mean, dtype=np.float32)
+        self.std = np.array(std, dtype=np.float32)
+
+    def __call__(self, image, boxes, labels):
+        image -= self.mean
+        image = image / self.std
+
+        return image, boxes, labels
+
 
 class TrainAugmentation:
-    def __init__(self, size, mean=0, std=1.0):
+    def __init__(self, size, mean=(0.0, 0.0, 0.0), std=(1.0, 1.0, 1.0)):
         """
         Args:
             size: the size the of final image.
@@ -420,13 +464,12 @@ class TrainAugmentation:
             ConvertFromInts(),
             PhotometricDistort(),
             Expand(self.mean),
-            RandomSampleCrop(),
+            RandomSSDCrop(),
             RandomMirror(),
-            ToPercentCoords(),
             Resize(self.size),
-            SubtractMeans(self.mean),
-            lambda img, boxes=None, labels=None: (img / std, boxes, labels),
-            ToTensor(),
+            Normalize(mean, std),
+            ChannelsFirst(),
+            ImageToTensor()
         ])
 
     def __call__(self, img, boxes, labels):
