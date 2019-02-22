@@ -4,7 +4,7 @@ import torch.nn.functional as F
 
 import numpy as np
 
-from ..utils.numpy import SSDDecodeConf, SSDDecodeBoxes, NMS
+from ..utils.torch import SSDDecodeConf, SSDDecodeBoxes
 
 def s_(k, smin, smax, m):
     '''
@@ -53,6 +53,7 @@ class AnchorCellCreator:
 
 def create_anchors(sizes, anchor_creator, clamp=True):
     anchors = []
+    anchors_per_cell = [0] * len(sizes)
     for k, (H, W) in enumerate(sizes):
         cell_h = 1.0 / H
         cell_w = 1.0 / W
@@ -62,48 +63,43 @@ def create_anchors(sizes, anchor_creator, clamp=True):
                 cell_cy = (h_i + 0.5) * cell_h
 
                 boxes = anchor_creator(k, H, W, h_i, w_i)
+                anchors_per_cell[k] = len(boxes)
                 anchors.append(boxes)
 
     anchors = np.concatenate(anchors, axis=0).astype(np.float32)
     anchors = torch.from_numpy(anchors)
     if clamp:
         anchors = torch.clamp(anchors, 0.0, 1.0)
-    return anchors
+    return anchors, anchors_per_cell
 
 class SSDHead(nn.Module):
-    def __init__(self, n_classes, in_channels, anchor_creator):
+    def __init__(self, n_classes, in_channels, fmap_sizes, anchor_creator):
         super().__init__()
 
         self.n_classes      = n_classes
         self.c_             = n_classes + 1 # Background class
         self.in_channels    = in_channels
-        self.anchor_creator = anchor_creator
-
 
         self.channels_per_anchor = 4 + self.c_
 
+        self.anchors, anchors_per_cell = create_anchors(fmap_sizes, anchor_creator)
+
         self.detection_layers = []
-        for in_channel, anchors_num in zip(self.in_channels, anchor_creator.anchors_per_cell):
+        for in_channel, anchors_num in zip(self.in_channels, anchors_per_cell):
             layer = nn.Conv2d(in_channel,  anchors_num * self.channels_per_anchor, 3, padding=1)
             self.detection_layers.append(layer)
 
         self.detection_layers = nn.ModuleList(self.detection_layers)
 
-        self.last_H0 = 0
-        self.last_W0 = 0
-        self.anchors = None
 
 
     def forward(self, backbone_outs):
         device = backbone_outs[0].device
         batch_size = backbone_outs[0].shape[0]
 
-        sizes = []
         outs = []
         for backbone_out, layer in zip(backbone_outs, self.detection_layers):
             out = layer(backbone_out).permute((0, 2, 3, 1)).contiguous()
-            H, W = out.shape[1], out.shape[2]
-            sizes.append((H, W))
             out = out.view((batch_size, -1, self.channels_per_anchor))
             outs.append(out)
         output = torch.cat(outs, dim=1)
@@ -111,40 +107,17 @@ class SSDHead(nn.Module):
         conf = output[:, :, :self.c_]
         loc = output[:, :, self.c_:]
 
-        H0, W0 = sizes[0]
-        if H0 != self.last_H0 or W0 != self.last_W0:
-            self.anchors = create_anchors(sizes, self.anchor_creator)
-            self.anchors = self.anchors.to(device)
-
         return conf, loc, self.anchors
 
-def SSDPostprocess(output, score_thresh=0.01, nms_threshold=0.5, variances=(0.1, 0.2)):
+def SSDPostprocess(output, variances=(0.1, 0.2)):
     conf_batch, loc_batch, anchors = output
     conf_batch = F.softmax(conf_batch, dim=-1)
 
-    conf_batch_np = conf_batch.cpu().numpy()
-    loc_batch_np = loc_batch.cpu().numpy()
-    anchors_np = anchors.cpu().numpy()
+    conf_batch = conf_batch.cpu()
+    loc_batch = loc_batch.cpu()
+    anchors = anchors.cpu()
 
-    labels_batch, scores_batch = SSDDecodeConf(conf_batch_np)
-    bboxes_batch = SSDDecodeBoxes(loc_batch_np, anchors_np, variances=variances)
+    labels_batch, scores_batch = SSDDecodeConf(conf_batch)
+    bboxes_batch = SSDDecodeBoxes(loc_batch, anchors, variances=variances)
 
-    chosen_bboxes = []
-    chosen_labels = []
-    chosen_scores  = []
-    for bboxes, labels, scores in zip(bboxes_batch, labels_batch, scores_batch):
-        bboxes = bboxes[scores > score_thresh]
-        labels = labels[scores > score_thresh]
-        scores  = scores[scores > score_thresh]
-
-        selected_indices = NMS(bboxes, scores, labels=labels, threshold=nms_threshold)
-
-        bboxes = bboxes[selected_indices]
-        labels = labels[selected_indices]
-        scores = scores[selected_indices]
-
-        chosen_bboxes.append(bboxes)
-        chosen_labels.append(labels)
-        chosen_scores.append(scores)
-
-    return chosen_bboxes, chosen_labels, chosen_scores
+    return bboxes_batch, labels_batch, scores_batch

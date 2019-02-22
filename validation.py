@@ -1,7 +1,7 @@
 import torch
 import numpy as np
 
-from pydet.utils.numpy import iou_v2v
+from pydet.utils.numpy import iou_v2v, postprocess
 
 class AverageMeter(object):
     """Computes and stores the average and current value"""
@@ -268,20 +268,18 @@ class DetectionMetrics:
 class DetectionValidator:
     def __init__(self,
                  data_loader,
-                 eval_transform,
                  criterion,
                  conf_thresh=0.5,
-                 match_threshold=0.5,
+                 nms_threshold=0.5,
                  ):
 
 
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
         self.data_loader = data_loader
-        self.eval_transform = eval_transform
         self.criterion = criterion
         self.conf_thresh = conf_thresh
-        self.match_threshold = match_threshold
+        self.nms_threshold = nms_threshold
 
         n_classes = len(data_loader.dataset.class_names)
         self.metrics = DetectionMetrics(n_classes)
@@ -292,16 +290,22 @@ class DetectionValidator:
         for images, targets in self.data_loader:
             images = images.to(self.device)
 
-            model_out = model(images)
+            loss_out, model_out = model(images)
 
-            losses = self.criterion(model_out, targets)
-
+            losses = self.criterion(loss_out, targets)
             if loss_avg is None:
                 loss_avg = {loss_name: AverageMeter() for loss_name in losses}
             for loss_name, loss_val in losses.items():
                 loss_avg[loss_name].update(loss_val.item())
 
-            pred_boxes, pred_labels, pred_scores = self.eval_transform(model_out)
+            pred_boxes, pred_labels, pred_scores = model_out
+            pred_boxes = pred_boxes.cpu().numpy()
+            pred_labels = pred_labels.cpu().numpy()
+            pred_scores = pred_scores.cpu().numpy()
+            pred_boxes, pred_labels, pred_scores = postprocess(pred_boxes, pred_labels, pred_scores,
+                                                               score_thresh=0.01,
+                                                               nms_threshold=self.nms_threshold
+                                                               )
 
             gt_boxes = targets[0]
             gt_labels = [target - 1 for target in targets[1]]

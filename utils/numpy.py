@@ -236,3 +236,20 @@ def NMS(bboxes, scores, labels=None, threshold=0.5, max_output_size=100 ):
     selected_indices = np.stack(selected_indices)
 
     return selected_indices
+
+def postprocess(bboxes_batch, labels_batch, scores_batch, score_thresh=0.01, nms_threshold=0.5):
+    chosen_bboxes = []
+    chosen_labels = []
+    chosen_scores = []
+    for bboxes, labels, scores in zip(bboxes_batch, labels_batch, scores_batch):
+        bboxes = bboxes[scores > score_thresh]
+        labels = labels[scores > score_thresh]
+        scores = scores[scores > score_thresh]
+        selected_indices = NMS(bboxes, scores, labels=labels, threshold=nms_threshold)
+        bboxes = bboxes[selected_indices]
+        labels = labels[selected_indices]
+        scores = scores[selected_indices]
+        chosen_bboxes.append(bboxes)
+        chosen_labels.append(labels)
+        chosen_scores.append(scores)
+    return chosen_bboxes, chosen_labels, chosen_scores

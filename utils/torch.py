@@ -87,3 +87,36 @@ def SSDEncode(targets, anchors, variances=(0.1, 0.2), threshold=0.5):
     loc_batch = torch.stack(loc_batch)
 
     return conf_batch, loc_batch
+
+def SSDDecodeConf(conf_batch):
+    '''
+
+    :param conf_batch: (Tensor) SSD classification output, shape [batch size, anchors num, classes num + 1]. Zero index of
+        axis=2 corresponds to background class
+    :return: labels_batch: List [batch size] of (Tensor) predicted labels of boxes, shape [N]
+             scores_batch: List [batch size] of (Tensor) predicted scores of boxes, shape [N]
+    '''
+
+    scores_wo_background = conf_batch[:, :, 1:]
+    scores_batch, labels_batch = torch.max(scores_wo_background, dim=-1)
+
+    return labels_batch, scores_batch
+
+def SSDDecodeBoxes(loc_batch, anchors, variances=(0.1, 0.2)):
+    '''
+
+    :param loc: (Tensor) SSD localization output, shape [batch size, anchors num, 4]
+    :param anchors: (Tensor) Anchors in center form, shape [anchors num, 4]
+    :param variances: Magical numbers:)  Loss coeffs for center localization and size localization
+    :return: bboxes_batch: List [batch size] of (Tensor) predicted bboxes in point (xmin, ymin, xmax, ymax) form, shape [N, 4]
+    '''
+    loc_batch = torch.clamp(loc_batch, -10e5, 10)
+
+    anchors = anchors.unsqueeze(0)
+    bboxes_batch = torch.cat((
+        anchors[:, :, :2] + loc_batch[:, :, :2] * variances[0] * anchors[:, :, 2:],
+        anchors[:, :, 2:] * torch.exp(loc_batch[:, :, 2:] * variances[1])), dim=2)
+
+    bboxes_batch[:, :, :2] -= bboxes_batch[:, :, 2:] / 2
+    bboxes_batch[:, :, 2:] += bboxes_batch[:, :, :2]
+    return bboxes_batch
