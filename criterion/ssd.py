@@ -155,7 +155,7 @@ class MultiboxLoss(nn.Module):
         gt_locations = []
 
         for boxes_i, labels_i in zip(target_boxes, target_labels):
-            pred_locations_i, pred_labels_i = match_boxes(boxes_i, labels_i, priors, self.variances, self.iou_threshold)
+            pred_locations_i, pred_labels_i = match_boxes(boxes_i, labels_i, priors.cpu(), self.variances, self.iou_threshold)
             gt_locations.append(pred_locations_i)
             labels.append(pred_labels_i)
 

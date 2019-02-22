@@ -82,7 +82,9 @@ class SSDHead(nn.Module):
 
         self.channels_per_anchor = 4 + self.c_
 
-        self.anchors, anchors_per_cell = create_anchors(fmap_sizes, anchor_creator)
+        anchors, anchors_per_cell = create_anchors(fmap_sizes, anchor_creator)
+
+        self.register_buffer('anchors', anchors)
 
         self.detection_layers = []
         for in_channel, anchors_num in zip(self.in_channels, anchors_per_cell):
