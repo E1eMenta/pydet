@@ -48,6 +48,7 @@ class CocoDataset(Dataset):
         )
         self.coco = COCO(annotation_path)
         self.image_ids = self.coco.getImgIds()
+        self.image_ids = [id for id in self.image_ids if len(self.coco.getAnnIds(imgIds=id, iscrowd=False)) > 0]
 
         self.load_classes()
 
@@ -87,8 +88,8 @@ class CocoDataset(Dataset):
         boxes[:, 3] /= height
         
 
-        if len(boxes) == 0 and "train" in self.set_name:
-            return self[random.randint(0, len(self) - 1)]
+        # if len(boxes) == 0 and "train" in self.set_name:
+        #     return self[random.randint(0, len(self) - 1)]
 
         if self.transform:
             image, boxes, labels = self.transform(image, boxes, labels)
