@@ -267,7 +267,7 @@ class DetectionMetrics:
 
 class DetectionValidator:
     def __init__(self,
-                 data_loader,
+                 n_classes,
                  criterion,
                  conf_thresh=0.5,
                  nms_threshold=0.5,
@@ -276,18 +276,16 @@ class DetectionValidator:
 
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-        self.data_loader = data_loader
         self.criterion = criterion
         self.conf_thresh = conf_thresh
         self.nms_threshold = nms_threshold
 
-        n_classes = len(data_loader.dataset.class_names)
         self.metrics = DetectionMetrics(n_classes)
 
-    def __call__(self, model, params):
+    def __call__(self, data_loader, model, params):
         loss_avg = None
 
-        for images, targets in self.data_loader:
+        for images, targets in data_loader:
             images = images.to(self.device)
 
             loss_out, model_out = model(images)
