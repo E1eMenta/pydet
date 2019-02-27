@@ -117,6 +117,7 @@ def SSDDecodeBoxes(loc_batch, anchors, variances=(0.1, 0.2)):
         anchors[:, :, :2] + loc_batch[:, :, :2] * variances[0] * anchors[:, :, 2:],
         anchors[:, :, 2:] * torch.exp(loc_batch[:, :, 2:] * variances[1])), dim=2)
 
-    bboxes_batch[:, :, :2] -= bboxes_batch[:, :, 2:] / 2
-    bboxes_batch[:, :, 2:] += bboxes_batch[:, :, :2]
+    bboxes_batch0 = bboxes_batch[:, :, :2] - bboxes_batch[:, :, 2:] / 2
+    bboxes_batch1 = bboxes_batch[:, :, 2:] + bboxes_batch0
+    bboxes_batch = torch.cat([bboxes_batch0, bboxes_batch1], dim=2)
     return bboxes_batch
