@@ -318,7 +318,7 @@ class DetectionValidator:
         precision, recall = self.metrics.precision_recall(conf_threshold=0.5)
         mPrecision = np.mean(precision)
         mRecall = np.mean(recall)
-        _, mAP05 = self.metrics.AP(0.5)
+        APs, mAP05 = self.metrics.AP(0.5)
         COCO_mAP = self.metrics.COCO_mAP()
         self.metrics.clear()
 
@@ -332,6 +332,12 @@ class DetectionValidator:
             eval_writer.add_scalar('mAP_.5_.95_', COCO_mAP, iteration)
             eval_writer.add_scalar('mPrecision_.5_', mPrecision, iteration)
             eval_writer.add_scalar('mRecall_.5_', mRecall, iteration)
+
+            for idx, class_name in enumerate(data_loader.dataset.class_names):
+                eval_writer.add_scalar(f"perClassRecall/{class_name}", recall[idx], iteration)
+                eval_writer.add_scalar(f"perClassPrecision/{class_name}", precision[idx], iteration)
+                eval_writer.add_scalar(f"perClassAP/{class_name}", APs[idx], iteration)
+
 
 
         print(f"Validation: mAP@[.5:.95] {COCO_mAP:.4f}, mAP@[.5] {mAP05:.4f}, mPrecision@[.5] {mPrecision:.4f}, mRecall@[.5] {mRecall:.4f}", end=" ")
