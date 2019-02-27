@@ -70,7 +70,7 @@ class CocoDataset(Dataset):
         for key, value in self.classes.items():
             self.labels[value] = key
 
-        self.class_names = self.labels
+        self.class_names = list(self.classes.keys())
 
     def __len__(self):
         return len(self.image_ids)
