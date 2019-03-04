@@ -9,11 +9,14 @@ This repo implements detection heads, criterions and utils. Aim of this repo is 
 
 ### SSD(Single Shot MultiBox Detector)
 SSDHead - SSD Detection Head
+
 MultiboxLoss - SSD loss function
 
 ### Data
 CocoDataset - MSCOCO dataset
+
 VOCDataset - Pascal VOC dataset
+
 Set of transforms for data augmentation
 
 ### Other
