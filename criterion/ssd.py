@@ -94,8 +94,13 @@ def match_boxes(gt_boxes, gt_labels, center_form_priors, variances=(0.1, 0.2), i
         gt_boxes = torch.from_numpy(gt_boxes)
     if type(gt_labels) is np.ndarray:
         gt_labels = torch.from_numpy(gt_labels)
-    boxes, labels = assign_priors(gt_boxes, gt_labels,
-                                            corner_form_priors, iou_threshold)
+
+    if gt_boxes.shape[0] == 0:
+        anchors_num = corner_form_priors.shape[0]
+        boxes = torch.zeros((anchors_num, 4)).float()
+        labels= torch.zeros((anchors_num)).long()
+    else:
+        boxes, labels = assign_priors(gt_boxes, gt_labels, corner_form_priors, iou_threshold)
     boxes = corner_form_to_center_form(boxes)
     locations = convert_boxes_to_locations(boxes, center_form_priors, center_variance,
                                                      size_variance)
