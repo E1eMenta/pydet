@@ -1,21 +1,69 @@
-# from https://github.com/amdegroot/ssd.pytorch
-
-
 import torch
 from torchvision import transforms
 import cv2
 import numpy as np
 import types
 from numpy import random
+import albumentations as albu
+from albumentations import Compose, OneOf, Blur
+from albumentations import DualTransform, ImageOnlyTransform
+import albumentations.augmentations.functional as F
 
+
+class ChannelsFirst(ImageOnlyTransform):
+    def __init__(self, always_apply=False, p=1.0):
+        super().__init__(always_apply, p)
+
+    def apply(self, image, **params):
+        return np.transpose(image, (2, 0, 1))
+
+class ImageToTensor(ImageOnlyTransform):
+    def __init__(self, always_apply=False, p=1.0):
+        super().__init__(always_apply, p)
+
+    def apply(self, image, **params):
+        return torch.from_numpy(image.astype(np.float32))
+
+
+class Expand(DualTransform):
+    def __init__(self, value, p=0.5, expand_ratio=4.0, always_apply=False):
+        super().__init__(always_apply, p)
+        self.value = value
+        self.expand_ratio = expand_ratio
+
+    def update_params(self, params, **kwargs):
+        params = super().update_params(params, **kwargs)
+        rows = params['rows']
+        cols = params['cols']
+
+        ratio = random.uniform(1, self.expand_ratio)
+        left = int(random.uniform(0, cols * ratio - cols))
+        top = int(random.uniform(0, rows * ratio - rows))
+
+        params.update({'pad_top': top,
+                       'pad_bottom': 0,
+                       'pad_left': left,
+                       'pad_right': 0})
+        return params
+
+    def apply(self, img, pad_top=0, pad_bottom=0, pad_left=0, pad_right=0, **params):
+        return F.pad_with_params(img, pad_top, pad_bottom, pad_left, pad_right,
+                                 border_mode=cv2.BORDER_CONSTANT, value=self.value)
+
+    def apply_to_bbox(self, bbox, pad_top=0, pad_bottom=0, pad_left=0, pad_right=0, rows=0, cols=0, **params):
+        x_min, y_min, x_max, y_max = F.denormalize_bbox(bbox, rows, cols)
+        bbox = [x_min + pad_left, y_min + pad_top, x_max + pad_left, y_max + pad_top]
+        return F.normalize_bbox(bbox, rows + pad_top + pad_bottom, cols + pad_left + pad_right)
+
+    def apply_to_keypoint(self, keypoint, pad_top=0, pad_bottom=0, pad_left=0, pad_right=0, **params):
+        x, y, a, s = keypoint
+        return [x + pad_left, y + pad_top, a, s]
 
 def intersect(box_a, box_b):
     max_xy = np.minimum(box_a[:, 2:], box_b[2:])
     min_xy = np.maximum(box_a[:, :2], box_b[:2])
     inter = np.clip((max_xy - min_xy), a_min=0, a_max=np.inf)
     return inter[:, 0] * inter[:, 1]
-
-
 def jaccard_numpy(box_a, box_b):
     """Compute the jaccard overlap of two sets of boxes.  The jaccard overlap
     is simply the intersection over union of two boxes.
@@ -36,7 +84,112 @@ def jaccard_numpy(box_a, box_b):
     return inter / union  # [A,B]
 
 
-class Compose(object):
+
+class RandomSSDCrop(DualTransform):
+
+    def __init__(self, scale_range=(0.3, 1.0), ar_range=(0.5, 2.0),
+                 always_apply=False, p=0.8, **params):
+        super().__init__(always_apply, p)
+        self.scale_range = scale_range
+        self.ar_range = ar_range
+        self.sample_options = (
+            (0.1, None),
+            (0.3, None),
+            (0.7, None),
+            (0.9, None),
+            # (None, None)
+        )
+
+    def apply(self, img, x_min=0, y_min=0, x_max=0, y_max=0, interpolation=cv2.INTER_LINEAR, **params):
+        return F.crop(img, x_min, y_min, x_max, y_max)
+
+    def get_random_params(self, height, weight):
+        ar = random.uniform(self.ar_range[0], self.ar_range[1])
+        scale = random.uniform(self.scale_range[0], self.scale_range[1])
+
+        w = min(width * scale * np.sqrt(ar), width)
+        h = min(height * scale / np.sqrt(ar), height)
+
+        x_shift = random.uniform(width - w)
+        y_shift = random.uniform(height - h)
+
+        return {'x_min': int(x_shift),
+                'y_min': int(y_shift),
+                'x_max': int(x_shift + w),
+                'y_max': int(y_shift + h)}
+
+    def get_params_dependent_on_targets(self, params):
+        height, width, _ = params['image'].shape
+
+        if 'bboxes' not in params:
+            return self.get_random_params(height, width)
+        if len(params['bboxes']) == 0:
+            return self.get_random_params(height, width)
+        boxes = np.array(params['bboxes'])[:, :4].copy()
+        boxes[:, 0] *= width
+        boxes[:, 2] *= width
+        boxes[:, 1] *= height
+        boxes[:, 3] *= height
+
+        while True:
+            # randomly choose a mode
+            r_idx = random.choice(list(range(len(self.sample_options))))
+            mode = self.sample_options[r_idx]
+
+            min_iou, max_iou = mode
+            if min_iou is None:
+                min_iou = float('-inf')
+            if max_iou is None:
+                max_iou = float('inf')
+
+            for _ in range(50):
+                ar = random.uniform(self.ar_range[0], self.ar_range[1])
+                scale = random.uniform(self.scale_range[0], self.scale_range[1])
+
+                w = min(width * scale * np.sqrt(ar), width)
+                h = min(height * scale / np.sqrt(ar), height)
+
+                x_shift = random.uniform(width - w)
+                y_shift = random.uniform(height - h)
+
+                # convert to integer rect x1,y1,x2,y2
+                rect = np.array([int(x_shift), int(y_shift), int(x_shift + w), int(y_shift + h)])
+
+                # calculate IoU (jaccard overlap) b/t the cropped and gt boxes
+                overlap = jaccard_numpy(boxes, rect)
+
+                # is min and max overlap constraint satisfied? if not try again
+                if overlap.min() < min_iou and max_iou < overlap.max():
+                    continue
+
+                # keep overlap with gt box IF center in sampled patch
+                centers = (boxes[:, :2] + boxes[:, 2:]) / 2.0
+
+                # mask in all gt boxes that above and to the left of centers
+                m1 = (rect[0] < centers[:, 0]) * (rect[1] < centers[:, 1])
+
+                # mask in all gt boxes that under and to the right of centers
+                m2 = (rect[2] > centers[:, 0]) * (rect[3] > centers[:, 1])
+
+                # mask in that both m1 and m2 are true
+                mask = m1 * m2
+
+                # have any valid boxes? try again if not
+                if not mask.any():
+                    continue
+                return {'x_min': int(x_shift),
+                        'y_min': int(y_shift),
+                        'x_max': int(x_shift + w),
+                        'y_max': int(y_shift + h)}
+
+    def apply_to_bbox(self, bbox, x_min=0, y_min=0, x_max=0, y_max=0, rows=0, cols=0, **params):
+        return F.bbox_crop(bbox, x_min, y_min, x_max, y_max, rows, cols)
+
+    @property
+    def targets_as_params(self):
+        return ['image', 'bboxes']
+
+class InternalCompose(object):
     """Composes several augmentations together.
     Args:
         transforms (List[Transform]): list of transforms to compose.
@@ -54,64 +207,6 @@ class Compose(object):
         for t in self.transforms:
             img, boxes, labels = t(img, boxes, labels)
         return img, boxes, labels
-
-
-class Lambda(object):
-    """Applies a lambda as a transform."""
-
-    def __init__(self, lambd):
-        assert isinstance(lambd, types.LambdaType)
-        self.lambd = lambd
-
-    def __call__(self, img, boxes=None, labels=None):
-        return self.lambd(img, boxes, labels)
-
-
-class ConvertFromInts(object):
-    def __call__(self, image, boxes=None, labels=None):
-        return image.astype(np.float32), boxes, labels
-
-
-class SubtractMeans(object):
-    def __init__(self, mean):
-        self.mean = np.array(mean, dtype=np.float32)
-
-    def __call__(self, image, boxes=None, labels=None):
-        image = image.astype(np.float32)
-        image -= self.mean
-        return image.astype(np.float32), boxes, labels
-
-
-class ToAbsoluteCoords(object):
-    def __call__(self, image, boxes=None, labels=None):
-        height, width, channels = image.shape
-        boxes[:, 0] *= width
-        boxes[:, 2] *= width
-        boxes[:, 1] *= height
-        boxes[:, 3] *= height
-
-        return image, boxes, labels
-
-
-class ToPercentCoords(object):
-    def __call__(self, image, boxes=None, labels=None):
-        height, width, channels = image.shape
-        boxes[:, 0] /= width
-        boxes[:, 2] /= width
-        boxes[:, 1] /= height
-        boxes[:, 3] /= height
-
-        return image, boxes, labels
-
-
-class Resize(object):
-    def __init__(self, size=(300, 300)):
-        self.size = size
-
-    def __call__(self, image, boxes=None, labels=None):
-        image = cv2.resize(image, (self.size[1],
-                                 self.size[0]))
-        return image, boxes, labels
 
 
 class RandomSaturation(object):
@@ -204,191 +299,6 @@ class RandomBrightness(object):
         return image, boxes, labels
 
 
-class ToCV2Image(object):
-    def __call__(self, tensor, boxes=None, labels=None):
-        return tensor.cpu().numpy().astype(np.float32).transpose((1, 2, 0)), boxes, labels
-
-class ChannelsFirst():
-    def __call__(self, image, boxes=None, labels=None):
-        return np.transpose(image, (2, 0, 1)), boxes, labels
-
-class ImageToTensor:
-    def __call__(self, image, boxes=None, labels=None):
-        return torch.from_numpy(image), boxes, labels
-
-
-class ToTensor(object):
-    def __call__(self, cvimage, boxes=None, labels=None):
-        return torch.from_numpy(cvimage.astype(np.float32)).permute(2, 0, 1), boxes, labels
-
-
-class RandomSSDCrop(object):
-    """Crop
-    Arguments:
-        img (Image): the image being input during training
-        boxes (Tensor): the original bounding boxes in pt form
-        labels (Tensor): the class labels for each bbox
-        mode (float tuple): the min and max jaccard overlaps
-    Return:
-        (img, boxes, classes)
-            img (Image): the cropped image
-            boxes (Tensor): the adjusted bounding boxes in pt form
-            labels (Tensor): the class labels for each bbox
-    """
-    def __init__(self, scale_range=(0.3, 1.0), ar_range=(0.5, 2.0)):
-        self.scale_range = scale_range
-        self.ar_range = ar_range
-        self.sample_options = (
-            # using entire original input image
-            None,
-            # sample a patch s.t. MIN jaccard w/ obj in .1,.3,.4,.7,.9
-            (0.1, None),
-            (0.3, None),
-            (0.7, None),
-            (0.9, None),
-            # randomly sample a patch
-            (None, None),
-        )
-        self.absolute = ToAbsoluteCoords()
-        self.persent = ToPercentCoords()
-
-    def __call__(self, image, boxes=None, labels=None):
-        height, width, _ = image.shape
-        image, boxes, labels = self.absolute(image, boxes, labels)
-        while True:
-            # randomly choose a mode
-            mode = random.choice(self.sample_options)
-            if mode is None:
-                image, boxes, labels = self.persent(image, boxes, labels)
-                return image, boxes, labels
-
-            min_iou, max_iou = mode
-            if min_iou is None:
-                min_iou = float('-inf')
-            if max_iou is None:
-                max_iou = float('inf')
-
-            # max trails (50)
-            for _ in range(50):
-                current_image = image
-
-                ar = random.uniform(self.ar_range[0], self.ar_range[1])
-                scale = random.uniform(self.scale_range[0], self.scale_range[1])
-
-                w = min(width * scale * np.sqrt(ar), width)
-                h = min(height * scale / np.sqrt(ar), height)
-
-                # aspect ratio constraint b/t .5 & 2
-                if h / w < self.ar_range[0] or h / w > self.ar_range[1]:
-                    continue
-
-                left = random.uniform(width - w)
-                top = random.uniform(height - h)
-
-                # convert to integer rect x1,y1,x2,y2
-                rect = np.array([int(left), int(top), int(left+w), int(top+h)])
-
-                # calculate IoU (jaccard overlap) b/t the cropped and gt boxes
-                overlap = jaccard_numpy(boxes, rect)
-
-                # is min and max overlap constraint satisfied? if not try again
-                if overlap.min() < min_iou and max_iou < overlap.max():
-                    continue
-
-                # cut the crop from the image
-                current_image = current_image[rect[1]:rect[3], rect[0]:rect[2],
-                                              :]
-
-                # keep overlap with gt box IF center in sampled patch
-                centers = (boxes[:, :2] + boxes[:, 2:]) / 2.0
-
-                # mask in all gt boxes that above and to the left of centers
-                m1 = (rect[0] < centers[:, 0]) * (rect[1] < centers[:, 1])
-
-                # mask in all gt boxes that under and to the right of centers
-                m2 = (rect[2] > centers[:, 0]) * (rect[3] > centers[:, 1])
-
-                # mask in that both m1 and m2 are true
-                mask = m1 * m2
-
-                # have any valid boxes? try again if not
-                if not mask.any():
-                    continue
-
-                # take only matching gt boxes
-                current_boxes = boxes[mask, :].copy()
-
-                # take only matching gt labels
-                current_labels = labels[mask]
-
-                # should we use the box left and top corner or the crop's
-                current_boxes[:, :2] = np.maximum(current_boxes[:, :2],
-                                                  rect[:2])
-                # adjust to crop (by substracting crop's left,top)
-                current_boxes[:, :2] -= rect[:2]
-
-                current_boxes[:, 2:] = np.minimum(current_boxes[:, 2:],
-                                                  rect[2:])
-                # adjust to crop (by substracting crop's left,top)
-                current_boxes[:, 2:] -= rect[:2]
-
-                image, boxes, labels = self.persent(current_image, current_boxes, current_labels)
-                return current_image, current_boxes, current_labels
-
-
-class Expand(object):
-    def __init__(self, mean, p=0.5, expand_ratio=4.0):
-        self.mean = mean
-        self.p = p
-        self.expand_ratio = expand_ratio
-        self.absolute = ToAbsoluteCoords()
-        self.persent = ToPercentCoords()
-
-    def __call__(self, image, boxes, labels):
-        if random.random() > self.p:
-            return image, boxes, labels
-
-        image, boxes, labels = self.absolute(image, boxes, labels)
-
-        height, width, depth = image.shape
-        ratio = random.uniform(1, self.expand_ratio)
-        left = random.uniform(0, width*ratio - width)
-        top = random.uniform(0, height*ratio - height)
-
-        expand_image = np.zeros(
-            (int(height*ratio), int(width*ratio), depth),
-            dtype=image.dtype)
-        expand_image[:, :, :] = self.mean
-        expand_image[int(top):int(top + height),
-                     int(left):int(left + width)] = image
-        image = expand_image
-
-        boxes = boxes.copy()
-        boxes[:, :2] += (int(left), int(top))
-        boxes[:, 2:] += (int(left), int(top))
-
-        image, boxes, labels = self.persent(image, boxes, labels)
-
-        return image, boxes, labels
-
-
-class RandomMirror(object):
-    def __init__(self, p=0.5):
-        self.p = p
-        self.absolute = ToAbsoluteCoords()
-        self.persent = ToPercentCoords()
-
-    def __call__(self, image, boxes, labels):
-        image, boxes, labels = self.absolute(image, boxes, labels)
-        _, width, _ = image.shape
-        if random.random() > self.p:
-            image = image[:, ::-1]
-            boxes = boxes.copy()
-            boxes[:, 0::2] = width - boxes[:, 2::-2]
-        image, boxes, labels = self.persent(image, boxes, labels)
-        return image, boxes, labels
-
-
 class SwapChannels(object):
     """Transforms a tensorized image by swapping the channels in the order
      specified in the swap tuple.
@@ -415,8 +325,32 @@ class SwapChannels(object):
         return image
 
 
-class PhotometricDistort(object):
-    def __init__(self):
+# class PhotometricDistort_old(object):
+#     def __init__(self):
+#         self.pd = [
+#             RandomContrast(),  # RGB
+#             ConvertColor(current="RGB", transform='HSV'),  # HSV
+#             RandomSaturation(),  # HSV
+#             RandomHue(),  # HSV
+#             ConvertColor(current='HSV', transform='RGB'),  # RGB
+#             RandomContrast()  # RGB
+#         ]
+#         self.rand_brightness = RandomBrightness()
+#         self.rand_light_noise = RandomLightingNoise()
+#
+#     def __call__(self, image, boxes, labels):
+#         im = image.copy()
+#         im, boxes, labels = self.rand_brightness(im, boxes, labels)
+#         if random.randint(2):
+#             distort = InternalCompose(self.pd[:-1])
+#         else:
+#             distort = InternalCompose(self.pd[1:])
+#         im, boxes, labels = distort(im, boxes, labels)
+#         return self.rand_light_noise(im, boxes, labels)
+    
+class PhotometricDistort(ImageOnlyTransform):
+    def __init__(self, always_apply=False, p=1.0):
+        super().__init__(always_apply, p)
         self.pd = [
             RandomContrast(),  # RGB
             ConvertColor(current="RGB", transform='HSV'),  # HSV
@@ -428,84 +362,13 @@ class PhotometricDistort(object):
         self.rand_brightness = RandomBrightness()
         self.rand_light_noise = RandomLightingNoise()
 
-    def __call__(self, image, boxes, labels):
+    def apply(self, image, **params):
         im = image.copy()
-        im, boxes, labels = self.rand_brightness(im, boxes, labels)
-        if random.randint(2):
-            distort = Compose(self.pd[:-1])
+        im, _, _ = self.rand_brightness(im, None, None)
+        if random.randint(0, 1):
+            distort = InternalCompose(self.pd[:-1])
         else:
-            distort = Compose(self.pd[1:])
-        im, boxes, labels = distort(im, boxes, labels)
-        return self.rand_light_noise(im, boxes, labels)
-
-
-class Normalize:
-    def __init__(self, mean, std):
-        self.mean = np.array(mean, dtype=np.float32)
-        self.std = np.array(std, dtype=np.float32)
-
-    def __call__(self, image, boxes, labels):
-        image -= self.mean
-        image = image / self.std
-
-        return image, boxes, labels
-
-
-class TrainAugmentation:
-    def __init__(self, size, mean=(0.0, 0.0, 0.0), std=(1.0, 1.0, 1.0)):
-        """
-        Args:
-            size: the size the of final image.
-            mean: mean pixel value per channel.
-        """
-        self.mean = mean
-        self.size = size
-        self.augment = Compose([
-            ConvertFromInts(),
-            PhotometricDistort(),
-            Expand(self.mean),
-            RandomSSDCrop(),
-            RandomMirror(),
-            Resize(self.size),
-            Normalize(mean, std),
-            ChannelsFirst(),
-            ImageToTensor()
-        ])
-
-    def __call__(self, img, boxes, labels):
-        """
-
-        Args:
-            img: the output of cv.imread in RGB layout.
-            boxes: boundding boxes in the form of (x1, y1, x2, y2).
-            labels: labels of boxes.
-        """
-        return self.augment(img, boxes, labels)
-
-
-class TestTransform:
-    def __init__(self, size, mean=0.0, std=1.0):
-        self.transform = Compose([
-            ToPercentCoords(),
-            Resize(size),
-            SubtractMeans(mean),
-            lambda img, boxes=None, labels=None: (img / std, boxes, labels),
-            ToTensor(),
-        ])
-
-    def __call__(self, image, boxes, labels):
-        return self.transform(image, boxes, labels)
-
-
-class PredictionTransform:
-    def __init__(self, size, mean=0.0, std=1.0):
-        self.transform = Compose([
-            Resize(size),
-            SubtractMeans(mean),
-            lambda img, boxes=None, labels=None: (img / std, boxes, labels),
-            ToTensor()
-        ])
-
-    def __call__(self, image):
-        image, _, _ = self.transform(image)
-        return image
+            distort = InternalCompose(self.pd[1:])
+        im, _, _ = distort(im, None, None)
+        im, _, _ = self.rand_light_noise(im, None, None)
+        return im

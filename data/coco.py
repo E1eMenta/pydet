@@ -12,7 +12,7 @@ from pycocotools.coco import COCO
 class CocoDataset(Dataset):
     """Coco dataset."""
 
-    def __init__(self, root_dir, set_name='train2017', transform=None, show=False, download=False):
+    def __init__(self, root_dir, set_name='train2017', transform=None, download=False):
         """
         Args:
             root_dir (string): COCO directory.
@@ -22,7 +22,6 @@ class CocoDataset(Dataset):
         self.root_dir = root_dir
         self.set_name = set_name
         self.transform = transform
-        self.show = show
 
         if download and not os.path.exists(os.path.join(root_dir, "train2017")):
             print("Download COCO")
@@ -78,23 +77,27 @@ class CocoDataset(Dataset):
     def __getitem__(self, idx):
         image = self.load_image(idx)
         annot = self.load_annotations(idx)
-        
-        boxes = annot[:, :4].astype(np.float32)
+
+        bboxes = annot[:, :4].astype(np.float32)
         labels = annot[:, 4].astype(np.int64) + 1
-        height, width, channels = image.shape
-        boxes[:, 0] /= width
-        boxes[:, 2] /= width
-        boxes[:, 1] /= height
-        boxes[:, 3] /= height
-        
 
-        # if len(boxes) == 0 and "train" in self.set_name:
-        #     return self[random.randint(0, len(self) - 1)]
-
+        # print("start", len(bboxes))
         if self.transform:
-            image, boxes, labels = self.transform(image, boxes, labels)
+            data = self.transform(image=image, bboxes=bboxes, labels=labels)
+            image, bboxes, labels = data["image"], data["bboxes"], data["labels"]
 
-        return image, (boxes, labels)
+        channels, height, width = image.shape
+        labels = np.array(labels, dtype=np.int64)
+        bboxes = np.array(bboxes, dtype=np.float32)
+        if len(bboxes) > 0:
+            bboxes[:, 0] /= width
+            bboxes[:, 2] /= width
+            bboxes[:, 1] /= height
+            bboxes[:, 3] /= height
+        else:
+            bboxes = np.zeros((0, 4), dtype=np.float32)
+
+        return image, (bboxes, labels)
 
     def load_image(self, image_index):
         image_info = self.coco.loadImgs(self.image_ids[image_index])[0]
