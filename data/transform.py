@@ -5,7 +5,7 @@ import numpy as np
 import types
 from numpy import random
 import albumentations as albu
-from albumentations import Compose, OneOf, Blur
+from albumentations import Compose
 from albumentations import DualTransform, ImageOnlyTransform
 import albumentations.augmentations.functional as F
 
@@ -103,7 +103,7 @@ class RandomSSDCrop(DualTransform):
     def apply(self, img, x_min=0, y_min=0, x_max=0, y_max=0, interpolation=cv2.INTER_LINEAR, **params):
         return F.crop(img, x_min, y_min, x_max, y_max)
 
-    def get_random_params(self, height, weight):
+    def get_random_params(self, height, width):
         ar = random.uniform(self.ar_range[0], self.ar_range[1])
         scale = random.uniform(self.scale_range[0], self.scale_range[1])
 
