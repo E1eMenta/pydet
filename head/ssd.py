@@ -115,9 +115,10 @@ def SSDPostprocess(output, variances=(0.1, 0.2)):
     conf_batch, loc_batch, anchors = output
     conf_batch = F.softmax(conf_batch, dim=-1)
 
-    conf_batch = conf_batch.cpu()
-    loc_batch = loc_batch.cpu()
-    anchors = anchors.cpu()
+    # conf_batch = conf_batch.cpu()
+    # loc_batch = loc_batch.cpu()
+    # anchors = anchors.cpu()
+
 
     labels_batch, scores_batch = SSDDecodeConf(conf_batch)
     bboxes_batch = SSDDecodeBoxes(loc_batch, anchors, variances=variances)
