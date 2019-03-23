@@ -25,6 +25,47 @@ class ImageToTensor(ImageOnlyTransform):
         return torch.from_numpy(image.astype(np.float32))
 
 
+class PadToAspectRatio(DualTransform):
+    def __init__(self, aspect_ratio, border_mode=cv2.BORDER_CONSTANT,
+                 value=[0, 0, 0], always_apply=False, p=1.0):
+        super().__init__(always_apply, p)
+        self.aspect_ratio = aspect_ratio
+        self.border_mode = border_mode
+        self.value = value
+
+    def update_params(self, params, **kwargs):
+        params = super().update_params(params, **kwargs)
+        rows = params['rows']
+        cols = params['cols']
+
+        src_ar = cols / rows
+        if self.aspect_ratio > src_ar:
+            bottom = 0
+            right = int(src_ar * src_height - src_width)
+        else:
+            bottom = int(src_width / src_ar - src_height)
+            right = 0
+
+        params.update({'pad_top': 0,
+                       'pad_bottom': bottom,
+                       'pad_left': 0,
+                       'pad_right': right})
+        return params
+
+    def apply(self, img, pad_top=0, pad_bottom=0, pad_left=0, pad_right=0, **params):
+        return F.pad_with_params(img, pad_top, pad_bottom, pad_left, pad_right,
+                                 border_mode=self.border_mode, value=self.value)
+
+    def apply_to_bbox(self, bbox, pad_top=0, pad_bottom=0, pad_left=0, pad_right=0, rows=0, cols=0, **params):
+        x_min, y_min, x_max, y_max = denormalize_bbox(bbox, rows, cols)
+        bbox = [x_min + pad_left, y_min + pad_top, x_max + pad_left, y_max + pad_top]
+        return normalize_bbox(bbox, rows + pad_top + pad_bottom, cols + pad_left + pad_right)
+
+    def apply_to_keypoint(self, keypoint, pad_top=0, pad_bottom=0, pad_left=0, pad_right=0, **params):
+        x, y, a, s = keypoint
+        return [x + pad_left, y + pad_top, a, s]
+
+
 class Expand(DualTransform):
     def __init__(self, value, p=0.5, expand_ratio=4.0, always_apply=False):
         super().__init__(always_apply, p)
