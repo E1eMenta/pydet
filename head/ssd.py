@@ -111,6 +111,16 @@ class SSDHead(nn.Module):
 
         return conf, loc, self.anchors
 
+    def minimal_forward(self, backbone_outs):
+        outs = []
+        for backbone_out, layer in zip(backbone_outs, self.detection_layers):
+            out = layer(backbone_out)
+            outs.append(out)
+
+        outs = outs + [self.anchors]
+
+        return tuple(outs)
+
 def SSDPostprocess(output, variances=(0.1, 0.2)):
     conf_batch, loc_batch, anchors = output
     conf_batch = F.softmax(conf_batch, dim=-1)
